@@ -105,12 +105,16 @@ computer.
 ```bash
 export WEBAPP_PORT=8888
 export SENZING_DIR=/opt/senzing
+export DOCKER_NB_PORT=8888
 
 docker run -it \
   --volume ${SENZING_DIR}:/opt/senzing \
-  --publish ${WEBAPP_PORT}:8888 \
+  --publish ${WEBAPP_PORT}:${DOCKER_NB_PORT} \
   senzing/jupyter \
-    start.sh jupyter notebook --NotebookApp.token=''
+    python3 -m jupyter notebook \
+      --ip 0.0.0.0 \
+      --port ${DOCKER_NB_PORT} \
+      --NotebookApp.token=''
 ```
 
 Access your notebook at: [http://127.0.0.1:8888/](http://127.0.0.1:8888/)

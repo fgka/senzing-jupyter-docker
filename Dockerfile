@@ -1,8 +1,14 @@
-# User can select the base image.
-# For BASE_CONTAINER choices, see https://jupyter-docker-stacks.readthedocs.io/en/latest/using/selecting.html
-
-ARG BASE_CONTAINER=jupyter/minimal-notebook
+# The newest LTS version, at this time, is bionic (18.04 LTS).
+# However, MySQL does not have a functioning repo for it.
+# Therefore, xenial (16.04LTS) instead.
+ARG BASE_CONTAINER=ubuntu:bionic
 FROM ${BASE_CONTAINER}
+
+LABEL maintainer="Michael Dockter <michael@senzing.com>"
+ARG NB_USER="senzing"
+ARG NB_UID="1000"
+ARG NB_GID="100"
+ARG NB_PORT="8888"
 
 ENV REFRESHED_AT=2019-02-17
 
@@ -13,34 +19,54 @@ ENV REFRESHED_AT=2019-02-17
 USER root
 
 # Update OS
-RUN apt-get update
-RUN apt-get -y upgrade
-RUN apt -y autoremove
+# MySQL repo requires https transport as an apt installation protocol
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get -y install apt-utils \
+  apt-transport-https \
+  ca-certificates \
+ && apt-get -y upgrade \
+ && apt-get -y autoremove 
 
 # Some extra applications
 RUN apt-get -y install \
-      curl \
-      gnupg \
-      jq \
-      libmysqlclient-dev \
-      lsb-core \
-      lsb-release \
-      python-dev \
-      python-pip \
-      python-pyodbc \
-      sqlite \
-      unixodbc \
-      unixodbc-dev \
-      wget \
- && rm -rf /var/lib/apt/lists/*
+  curl \
+  libmysqlclient-dev \
+  gnupg \
+  jq \
+  locales \
+  lsb-base \
+  lsb-release \
+  net-tools \
+  network-manager \
+  python3-dev \
+  python3-pip \
+  python-pyodbc \
+  sqlite \
+  sudo \
+  unixodbc \
+  unixodbc-dev \
+  wget 
 
-# Install libmysqlclient.
-ENV DEBIAN_FRONTEND=noninteractive
-RUN wget https://repo.mysql.com/mysql-apt-config_0.8.11-1_all.deb \
- && dpkg --install mysql-apt-config_0.8.11-1_all.deb \
- && apt-get update \
- && apt-get -y install libmysqlclient21 \
- && rm mysql-apt-config_0.8.11-1_all.deb \
+# Add MySQL apt repo
+ARG DEB_PACKAGE=mysql-apt-config_0.8.12-1_all.deb
+ARG MYSQL_REPO_URL=https://repo.mysql.com/${DEB_PACKAGE}
+RUN wget ${MYSQL_REPO_URL} \
+ && dpkg --install ${DEB_PACKAGE} \
+ && rm ${DEB_PACKAGE}
+
+# MySQL repo has a defect on the repo's URLs, below is the fix
+RUN sed -i -s "s#${DEB_PACKAGE}#apt#g" /etc/apt/sources.list.d/mysql.list 
+
+# Install latest lib client
+RUN apt-get update \
+ && apt-get -y upgrade \
+ && apt-get install -y libmysqlclient21
+
+# Last update since a new repo was added.
+RUN apt-get update \
+ && apt-get -y upgrade \
+ && apt-get -y autoremove \
  && rm -rf /var/lib/apt/lists/*
 
 # Create MySQL connector.
@@ -48,12 +74,17 @@ RUN wget https://repo.mysql.com/mysql-apt-config_0.8.11-1_all.deb \
 #  - https://dev.mysql.com/downloads/connector/odbc/
 #  - https://dev.mysql.com/doc/connector-odbc/en/connector-odbc-installation-binary-unix-tarball.html
 
-RUN wget https://cdn.mysql.com//Downloads/Connector-ODBC/8.0/mysql-connector-odbc-8.0.13-linux-ubuntu18.04-x86-64bit.tar.gz \
- && tar -xvf mysql-connector-odbc-8.0.13-linux-ubuntu18.04-x86-64bit.tar.gz \
- && cp mysql-connector-odbc-8.0.13-linux-ubuntu18.04-x86-64bit/lib/* /usr/lib/x86_64-linux-gnu/odbc/ \
- && mysql-connector-odbc-8.0.13-linux-ubuntu18.04-x86-64bit/bin/myodbc-installer -d -a -n "MySQL" -t "DRIVER=/usr/lib/x86_64-linux-gnu/odbc/libmyodbc8w.so;" \
- && rm mysql-connector-odbc-8.0.13-linux-ubuntu18.04-x86-64bit.tar.gz \
- && rm -rf mysql-connector-odbc-8.0.13-linux-ubuntu18.04-x86-64bit
+ARG MYSQL_ODBC_BASE_URL=https://dev.mysql.com/get/Downloads/Connector-ODBC/8.0
+ARG MYSQL_ODBC_NAME=mysql-connector-odbc-8.0.15-linux-debian9-x86-64bit
+ARG MYSQL_ODBC_TGZ=${MYSQL_ODBC_NAME}.tar.gz
+ARG MYSQL_ODBC_TGZ_URL=${MYSQL_ODBC_BASE_URL}/${MYSQL_ODBC_TGZ}
+RUN wget ${MYSQL_ODBC_TGZ_URL} \
+ && tar -xvf ${MYSQL_ODBC_TGZ} \
+ && cp ${MYSQL_ODBC_NAME}/lib/* /usr/lib/x86_64-linux-gnu/odbc/ \
+ && ${MYSQL_ODBC_NAME}/bin/myodbc-installer -d -a -n "MySQL"\
+      -t "DRIVER=/usr/lib/x86_64-linux-gnu/odbc/libmyodbc8w.so;" \
+ && rm ${MYSQL_ODBC_TGZ} \
+ && rm -rf ${MYSQL_ODBC_NAME}
 
 #############################################
 ## Python infrastructure 
@@ -61,47 +92,15 @@ RUN wget https://cdn.mysql.com//Downloads/Connector-ODBC/8.0/mysql-connector-odb
 
 USER root
 
-# Update Anaconda
-RUN conda update -y -n base conda
+RUN python3 -m pip install --upgrade pip
 
-# Python 2
-RUN conda create -n ipykernel_py2 python=2 ipykernel
-
-# Python libraries for python 2.7
-RUN conda install -n ipykernel_py2 -y \
-      bokeh \
-      ipykernel \
-      ipython \
-      networkx \
-      numpy \
-      pandas \
-      plotly \
-      psutil \
-      pyodbc \
-      qgrid \
-      seaborn \
-      sympy \
-      version_information
-
-# Install notebook widgets
-RUN conda install -n ipykernel_py2 -c conda-forge -y \
-      widgetsnbextension \
-      ipywidgets
-
-# Python 3
-RUN conda create -n ipykernel_py3 python=3 ipykernel
-
-# Install jupyter widgets for qgrid
-RUN conda run -n ipykernel_py3 jupyter labextension install @jupyter-widgets/jupyterlab-manager
-# Enable qgrid inside jupyter notebooks
-RUN conda run -n ipykernel_py3 jupyter labextension install qgrid
-# Install python 3 kernel for users
-RUN conda run -n ipykernel_py3 python -m ipykernel install --user
 # Python libraries for python 3
-RUN conda install -n ipykernel_py3 -y \
+RUN python3 -m pip install \
       bokeh \
       ipykernel \
       ipython \
+      ipywidgets \
+      jupyter \
       networkx \
       numpy \
       pandas \
@@ -111,15 +110,8 @@ RUN conda install -n ipykernel_py3 -y \
       qgrid \
       seaborn \
       sympy \
-      version_information
-
-# Install notebook widgets
-RUN conda install -n ipykernel_py3 -c conda-forge -y \
-      widgetsnbextension \
-      ipywidgets
-
-# Update nodeJS
-RUN npm i -g npm
+      version_information \
+      widgetsnbextension
 
 #############################################
 ## Prepare user home dir
@@ -127,24 +119,50 @@ RUN npm i -g npm
 
 USER root
 
-# Copy files from repository.
-COPY ./senzing-example-notebooks /home/$NB_USER/
+# Source: https://github.com/jupyter/docker-stacks/blob/master/base-notebook/Dockerfile
+# Enforce UTF-8 and english
+RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen \
+  && locale-gen
 
-# Adjust permissions
-RUN chown -R $NB_UID:$NB_GID /home/$NB_USER
-RUN chmod -R ug+rw /home/$NB_USER
+# Add NB_USER
+RUN groupadd wheel -g 11 \
+  && echo "auth required pam_wheel.so use_uid" >> /etc/pam.d/su  \
+  && useradd -m -s /bin/bash -N -u ${NB_UID} ${NB_USER} \
+  && chmod g+w /etc/passwd
 
-# Return to original user.
-# Defined in https://github.com/jupyter/docker-stacks/blob/master/base-notebook/Dockerfile
+# Bring loopback up (required for notebooks)
+RUN service network-manager restart
+# Enable users to connect, externally, to local port
+EXPOSE ${NB_PORT}
+
+ENV HOME=/home/$NB_USER \
+  SHELL=/bin/bash \
+  NB_USER=$NB_USER \
+  NB_UID=$NB_UID \
+  NB_GID=$NB_GID \
+  LC_ALL=en_US.UTF-8 \
+  LANG=en_US.UTF-8 \
+  LANGUAGE=en_US.UTF-8
+WORKDIR ${HOME}
 
 #############################################
 ## User environment setting
 #############################################
 
-USER $NB_UID
+USER root
+
+# Copy files from repository.
+COPY ./senzing-example-notebooks /home/${NB_USER}/
+
+# Fix permissions
+RUN chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}
+RUN chmod -R ug+rw /home/${NB_USER}
+
+
+# Setup user running the notebook process
+USER ${NB_UID}
 
 ENV SENZING_ROOT=/opt/senzing
 ENV PYTHONPATH=${SENZING_ROOT}/g2/python
 ENV LD_LIBRARY_PATH=${SENZING_ROOT}/g2/lib:${SENZING_ROOT}/g2/lib/debian
-
 
