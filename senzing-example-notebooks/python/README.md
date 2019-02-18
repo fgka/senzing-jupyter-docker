@@ -61,7 +61,7 @@ Follow the instructions at [HOWTO/create-senzing-dir.md](https://github.com/Senz
 
 Edit the file:
 ```
-${HOME}Library/Group\ Containers/group.com.docker/settings.json
+${HOME}/Library/Group\ Containers/group.com.docker/settings.json
 ```
 
 It should have something like:
