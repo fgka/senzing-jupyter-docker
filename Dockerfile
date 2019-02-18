@@ -4,7 +4,7 @@
 ARG BASE_CONTAINER=jupyter/minimal-notebook
 FROM ${BASE_CONTAINER}
 
-ENV REFRESHED_AT=2019-02-09
+ENV REFRESHED_AT=2019-02-17
 
 #############################################
 ## OS infrastructure 
@@ -88,12 +88,35 @@ RUN conda install -n ipykernel_py2 -c conda-forge -y \
       widgetsnbextension \
       ipywidgets
 
+# Python 3
+RUN conda create -n ipykernel_py3 python=3 ipykernel
+
 # Install jupyter widgets for qgrid
-RUN conda run -n ipykernel_py2 jupyter labextension install @jupyter-widgets/jupyterlab-manager
+RUN conda run -n ipykernel_py3 jupyter labextension install @jupyter-widgets/jupyterlab-manager
 # Enable qgrid inside jupyter notebooks
-RUN conda run -n ipykernel_py2 jupyter labextension install qgrid
-# Install python 2.7 kernel for users
-RUN conda run -n ipykernel_py2 python -m ipykernel install --user
+RUN conda run -n ipykernel_py3 jupyter labextension install qgrid
+# Install python 3 kernel for users
+RUN conda run -n ipykernel_py3 python -m ipykernel install --user
+# Python libraries for python 3
+RUN conda install -n ipykernel_py3 -y \
+      bokeh \
+      ipykernel \
+      ipython \
+      networkx \
+      numpy \
+      pandas \
+      plotly \
+      psutil \
+      pyodbc \
+      qgrid \
+      seaborn \
+      sympy \
+      version_information
+
+# Install notebook widgets
+RUN conda install -n ipykernel_py3 -c conda-forge -y \
+      widgetsnbextension \
+      ipywidgets
 
 # Update nodeJS
 RUN npm i -g npm
