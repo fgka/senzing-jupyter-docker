@@ -10,6 +10,59 @@ ARG NB_UID="1000"
 ARG NB_GID="100"
 ARG NB_PORT="8888"
 
+ARG APT_LIST="\
+  bash \
+  build-essential \
+  curl \
+  g++ \
+  gcc \
+  git \
+  gnupg \
+  jq \
+  libbz2-dev \
+  libffi-dev \
+  libmysqlclient-dev \
+  libreadline-dev \
+  libsqlite3-dev \
+  libssl-dev \
+  locales \
+  lsb-base \
+  lsb-release \
+  make \
+  net-tools \
+  network-manager \
+  python \
+  python-dev \
+  python3 \
+  python3-dev \
+  sqlite \
+  sudo \
+  unixodbc \
+  unixodbc-dev \
+  wget \
+  zlib1g-dev"
+
+ARG PIP_LIST="\
+  bokeh \
+  ipykernel \
+  ipython \
+  ipywidgets \
+  jupyter \
+  networkx \
+  numpy \
+  pandas \
+  plotly \
+  psutil \
+  pyodbc \
+  qgrid \
+  seaborn \
+  sympy \
+  version_information \
+  widgetsnbextension"
+
+ARG PYENV_TARGET=2.7.16
+#ARG PYENV_TARGET=3.6.8
+
 ENV REFRESHED_AT=2019-02-17
 
 #############################################
@@ -17,6 +70,8 @@ ENV REFRESHED_AT=2019-02-17
 #############################################
 
 USER root
+
+RUN rm -f /var/lib/apt/lists/* /var/cache/apt/*.bin
 
 # Update OS
 # MySQL repo requires https transport as an apt installation protocol
@@ -29,24 +84,7 @@ RUN apt-get update \
  && apt-get -y autoremove 
 
 # Some extra applications
-RUN apt-get -y install \
-  curl \
-  libmysqlclient-dev \
-  gnupg \
-  jq \
-  locales \
-  lsb-base \
-  lsb-release \
-  net-tools \
-  network-manager \
-  python3-dev \
-  python3-pip \
-  python-pyodbc \
-  sqlite \
-  sudo \
-  unixodbc \
-  unixodbc-dev \
-  wget 
+RUN apt-get --fix-missing -y install ${APT_LIST}
 
 # Add MySQL apt repo
 ARG DEB_PACKAGE=mysql-apt-config_0.8.12-1_all.deb
@@ -85,33 +123,6 @@ RUN wget ${MYSQL_ODBC_TGZ_URL} \
       -t "DRIVER=/usr/lib/x86_64-linux-gnu/odbc/libmyodbc8w.so;" \
  && rm ${MYSQL_ODBC_TGZ} \
  && rm -rf ${MYSQL_ODBC_NAME}
-
-#############################################
-## Python infrastructure 
-#############################################
-
-USER root
-
-RUN python3 -m pip install --upgrade pip
-
-# Python libraries for python 3
-RUN python3 -m pip install \
-      bokeh \
-      ipykernel \
-      ipython \
-      ipywidgets \
-      jupyter \
-      networkx \
-      numpy \
-      pandas \
-      plotly \
-      psutil \
-      pyodbc \
-      qgrid \
-      seaborn \
-      sympy \
-      version_information \
-      widgetsnbextension
 
 #############################################
 ## Prepare user home dir
@@ -158,10 +169,50 @@ COPY ./senzing-example-notebooks /home/${NB_USER}/
 RUN chown -R ${NB_UID}:${NB_GID} /home/${NB_USER}
 RUN chmod -R ug+rw /home/${NB_USER}
 
+#############################################
+## User setup: pyenv and senzing
+#############################################
 
 # Setup user running the notebook process
 USER ${NB_UID}
 
+# Pyenv install
+#RUN curl https://pyenv.run | bash
+RUN git clone git://github.com/yyuu/pyenv.git .pyenv
+
+ENV PYENV_ROOT ${HOME}/.pyenv
+ENV PATH ${PYENV_ROOT}/shims:${PYENV_ROOT}/bin:${PATH}
+
+# Pyenv setup
+# Create bash pyenv setup script
+RUN echo \
+'PYENV_ROOT=${HOME}/.pyenv\n\
+export PATH="${PYENV_ROOT}/shims:${PYENV_ROOT}/bin:$PATH"\n\
+eval "$(pyenv init -)"\n\
+eval "$(pyenv virtualenv-init -)"\n\
+' > ${HOME}/add_pyenv.sh 
+# put on effect for python installation
+RUN chmod 755 ${HOME}/add_pyenv.sh && ${HOME}/add_pyenv.sh
+# add to .bashrc
+RUN cat ${HOME}/add_pyenv.sh >> ${HOME}/.bashrc 
+
+# Python install
+RUN pyenv install ${PYENV_TARGET}
+RUN pyenv global ${PYENV_TARGET}
+RUN pyenv local ${PYENV_TARGET}
+RUN pyenv rehash
+
+# Python install dependencies
+RUN pip install --upgrade pip
+RUN pip install ${PIP_LIST}
+
+# Install proper ipython kernel
+RUN python -m ipykernel install --user
+
+RUN jupyter nbextension enable --py --sys-prefix widgetsnbextension
+RUN jupyter nbextension enable --py --sys-prefix qgrid
+
+# Finish up senzing setup
 ENV SENZING_ROOT=/opt/senzing
 ENV PYTHONPATH=${SENZING_ROOT}/g2/python
 ENV LD_LIBRARY_PATH=${SENZING_ROOT}/g2/lib:${SENZING_ROOT}/g2/lib/debian
